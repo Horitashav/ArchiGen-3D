@@ -1,4 +1,13 @@
-import type { GenerationResponse, TaskResult } from "@/types";
+import type {
+  GenerationResponse,
+  TaskResult,
+  User,
+  TokenResponse,
+  LoginCredentials,
+  RegisterData,
+  Conversation,
+  Message,
+} from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -18,11 +27,22 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export const api = {
-  generateArchitecture: async (prompt: string): Promise<GenerationResponse> => {
+  // ──── Architecture & Generation ────
+  generateArchitecture: async (
+    prompt: string,
+    conversationId: string | null = null,
+    token?: string
+  ): Promise<GenerationResponse> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
     const response = await fetch(`${API_URL}/architecture/generate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      headers,
+      body: JSON.stringify({
+        prompt,
+        conversation_id: conversationId,
+      }),
     });
     return handleResponse<GenerationResponse>(response);
   },
@@ -32,12 +52,55 @@ export const api = {
     return handleResponse<TaskResult>(response);
   },
 
-  parseOnly: async (prompt: string): Promise<Record<string, unknown>> => {
-    const response = await fetch(`${API_URL}/architecture/parse-only`, {
+  // ──── Conversations ────
+  getConversations: async (token: string): Promise<Conversation[]> => {
+    const response = await fetch(`${API_URL}/conversations`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return handleResponse<Conversation[]>(response);
+  },
+
+  getMessages: async (conversationId: string, token: string): Promise<Message[]> => {
+    const response = await fetch(`${API_URL}/conversations/${conversationId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return handleResponse<Message[]>(response);
+  },
+
+  // ──── Authentication ────
+  register: async (data: RegisterData): Promise<User> => {
+    const response = await fetch(`${API_URL}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(data),
     });
-    return handleResponse<Record<string, unknown>>(response);
+    return handleResponse<User>(response);
+  },
+
+  login: async (credentials: LoginCredentials): Promise<TokenResponse> => {
+    const response = await fetch(`${API_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(credentials),
+    });
+    return handleResponse<TokenResponse>(response);
+  },
+
+  refreshToken: async (refreshToken: string): Promise<TokenResponse> => {
+    const response = await fetch(
+      `${API_URL}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    return handleResponse<TokenResponse>(response);
+  },
+
+  getMe: async (accessToken: string): Promise<User> => {
+    const response = await fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return handleResponse<User>(response);
   },
 };

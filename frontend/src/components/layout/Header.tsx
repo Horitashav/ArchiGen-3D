@@ -1,11 +1,15 @@
 "use client";
 
-import { Building2, Moon, Sun, Code } from "lucide-react";
+import { Building2, Moon, Sun, LogIn } from "lucide-react";
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
+import { useAuth } from "@/contexts/AuthContext";
+import { UserMenu } from "@/components/auth/UserMenu";
 
 export function Header() {
   const [isDark, setIsDark] = useState(false);
+  const { isAuthenticated, isLoading } = useAuth();
 
   const toggleDark = () => {
     setIsDark(!isDark);
@@ -16,8 +20,7 @@ export function Header() {
     <header className="sticky top-0 z-50 glass border-b border-surface-200 dark:border-surface-700">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <div className="p-2 bg-architect-500 rounded-xl text-white">
               <Building2 className="h-5 w-5" />
             </div>
@@ -29,21 +32,25 @@ export function Header() {
                 AI Architecture Generator
               </p>
             </div>
-          </div>
+          </Link>
 
-          {/* Actions */}
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={toggleDark}>
               {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
-            <a
-              href="https://github.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center p-2 rounded-xl text-zinc-600 hover:bg-surface-100 dark:text-zinc-400 dark:hover:bg-surface-800 transition-colors"
-            >
-              <Code className="h-4 w-4" />
-            </a>
+
+            {isLoading ? (
+              <div className="w-20 h-8 rounded-xl bg-surface-200 dark:bg-surface-700 animate-pulse" />
+            ) : isAuthenticated ? (
+              <UserMenu />
+            ) : (
+              <Link href="/login">
+                <Button variant="primary" size="sm">
+                  <LogIn className="h-4 w-4" />
+                  Sign in
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
       </div>

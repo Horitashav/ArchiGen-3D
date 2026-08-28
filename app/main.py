@@ -1,16 +1,19 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 from app.config import settings
 from app.api.v1.router import api_router
 from app.core.exceptions import AppException, app_exception_handler
 from app.db.session import engine
 from app.db.base import Base
-import app.db.models.generation_task  # Register models with Base.metadata
 
+# Register all models with Base.metadata before creating tables
+import app.db.models.user
+import app.db.models.generation_task
+import app.db.models.conversation
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """

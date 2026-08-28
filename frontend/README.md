@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend
 
-## Getting Started
+This directory contains the Next.js client for Text-to-3D Architect. It provides authentication screens, the conversational architecture workspace, generation progress, structured specification details, and a 3D model viewer.
 
-First, run the development server:
+## Requirements
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js 18.18 or newer
+- npm
+- The backend API running locally or an accessible deployed API
+
+## Configuration
+
+Create `frontend/.env.local` when the backend is not using its default URL:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The default in `src/lib/api.ts` is `http://localhost:8000/api/v1`. Keep `/api/v1` in the value. The client derives the backend origin from this URL when loading generated model files.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Run Locally
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```powershell
+npm install
+npm run dev
+```
 
-## Learn More
+Open `http://localhost:3000`. The root route redirects to `/chat`; unauthenticated users are redirected to `/login`.
 
-To learn more about Next.js, take a look at the following resources:
+## Available Scripts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```powershell
+npm run dev      # Start the development server
+npm run lint     # Run ESLint
+npm run build    # Create a production build
+npm run start    # Serve the production build
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Main Routes
 
-## Deploy on Vercel
+- `/login` signs in an existing user.
+- `/register` creates a new user account.
+- `/chat` provides the authenticated architecture generation workspace.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Client Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```text
+src/
+├── app/                  Next.js routes and global styles
+├── components/auth/      User account controls
+├── components/chat/      Sidebar, messages, prompt bar, and detail panel
+├── components/generator/ Model viewer, specification, and status UI
+├── components/layout/    Shared application header
+├── components/ui/        Reusable buttons, cards, badges, and spinners
+├── contexts/             Authentication state
+├── hooks/                Generation-related hooks
+├── lib/api.ts            Backend request client
+└── types/                Shared TypeScript models
+```
+
+## Generation Flow
+
+1. The user submits a prompt from the chat workspace.
+2. The client sends it to `POST /api/v1/architecture/generate`.
+3. The returned task ID is polled every three seconds.
+4. Status, architecture data, errors, and the generated model URL are displayed as the task changes.
+5. Conversations and messages are loaded through the authenticated conversation endpoints.
+
+## Backend Dependency
+
+Start the backend from the repository root before using generation or authentication:
+
+```powershell
+uvicorn app.main:app --reload --port 8000
+```
+
+See the [backend README](../app/README.md) for API and environment details. See the [project README](../README.md) for full-stack setup.

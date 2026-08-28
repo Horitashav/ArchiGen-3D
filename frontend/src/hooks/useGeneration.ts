@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { TaskStatus, TaskResult, ArchitectureSpec } from "@/types";
 
 interface GenerationState {
@@ -14,6 +15,7 @@ interface GenerationState {
 }
 
 export function useGeneration() {
+  const { token } = useAuth();
   const [state, setState] = useState<GenerationState>({
     status: "idle",
     taskId: null,
@@ -45,8 +47,8 @@ export function useGeneration() {
               ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "")}${result.model_url}`
               : null,
             spec: result.architecture_spec
-              ? (typeof result.architecture_spec === "string" 
-                  ? JSON.parse(result.architecture_spec) 
+              ? (typeof result.architecture_spec === "string"
+                  ? JSON.parse(result.architecture_spec)
                   : result.architecture_spec)
               : prev.spec,
           }));
@@ -86,7 +88,7 @@ export function useGeneration() {
       });
 
       try {
-        const response = await api.generateArchitecture(prompt);
+        const response = await api.generateArchitecture(prompt, token || undefined);
 
         setState((prev) => ({
           ...prev,
@@ -97,7 +99,6 @@ export function useGeneration() {
         if (response.status !== "completed" && response.status !== "failed") {
           startPolling(response.task_id);
         } else {
-          // If task completed immediately, fetch final task payload
           const result = await api.getTaskStatus(response.task_id);
           setState((prev) => ({
             ...prev,
@@ -122,7 +123,7 @@ export function useGeneration() {
         }));
       }
     },
-    [startPolling, stopPolling]
+    [startPolling, stopPolling, token]
   );
 
   const reset = useCallback(() => {

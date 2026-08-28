@@ -1,12 +1,31 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
-pydantic>=2.6.0
-pydantic-settings>=2.2.0
-openai>=1.14.0
-instructor>=1.2.0
-httpx>=0.27.0
-aiofiles>=23.2.0
-sqlalchemy[asyncio]>=2.0.28
+# Web Framework & Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.6
+
+# Asynchronous Database & ORM
+SQLAlchemy>=2.0.30
 aiosqlite>=0.20.0
-python-dotenv>=1.0.1
-streamlit>=1.32.0
+greenlet>=3.0.3
+
+# Configuration & Data Validation
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+pydantic[email]>=2.7.0
+email-validator>=2.1.0
+
+# LLM & Inference Clients
+groq>=0.9.0
+httpx>=0.27.0
+
+# Authentication & Cryptography
+python-jose[cryptography]>=3.3.0
+passlib>=1.7.4
+bcrypt>=4.0.1
+cryptography>=42.0.0
+
+# 3D Geometry Processing & File I/O
+trimesh>=4.4.0
+numpy>=1.26.0
+scipy>=1.13.0
+Pillow>=10.3.0
