@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     
     # AI & Groq
     GROQ_API_KEY: str = ""
-    GROQ_MODEL_NAME: str = "llama3-70b-8192"
+    GROQ_MODEL_NAME: str = "openai/gpt-oss-20b"
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./dev.db"

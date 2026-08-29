@@ -1,68 +1,58 @@
+from enum import Enum
+from typing import List, Optional, Any, Union
 from pydantic import BaseModel, Field
-from typing import List, Optional
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    PARSING = "parsing"
+    GENERATING_2D = "generating_2d"
+    GENERATING_3D = "generating_3d"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
 
 class RoomSpec(BaseModel):
-    """
-    Represents an individual room or spatial section within the architectural plan.
-    """
-    name: str = Field(
-        ...,
-        description="Name of the area, e.g., Master Bedroom, Courtyard, Living Room, Rooftop Terrace"
-    )
-    floor_level: int = Field(
-        default=1,
-        ge=0,
-        description="Floor level where this area is located (0 for ground floor / basement, 1+ for upper levels)"
-    )
-    dimensions_approx: str = Field(
-        ...,
-        description="Approximate dimensions or size category, e.g., '5m x 6m', 'Spacious', 'Compact'"
-    )
+    name: str = Field(..., description="Name/purpose of the room (e.g. Master Bedroom, Open Office)")
+    floor_level: int = Field(default=1, description="Floor index where this room is located")
+    dimensions_approx: str = Field(..., description="Approximate dimensions (e.g. 5m x 4m)")
+
 
 class ArchitectureSpec(BaseModel):
-    """
-    The structured blueprint extracted from user natural language.
-    This schema is directly bound to the LLM structured output engine.
-    """
-    building_type: str = Field(
-        ...,
-        description="Building category: Residential, Office, Commercial, Villa, Pavilion, Skyscraper"
-    )
-    architectural_style: str = Field(
-        ...,
-        description="Design style: Modernist, Brutalist, Minimalist, Industrial, Art Deco, Biophilic, Scandinavian"
-    )
-    total_floors: int = Field(
-        default=1,
-        ge=1,
-        le=100,
-        description="Total number of stories or vertical levels"
-    )
-    materials: List[str] = Field(
-        ...,
-        min_length=1,
-        description="Primary construction and facade materials, e.g., ['Glass', 'Reinforced Concrete', 'Cedar Wood']"
-    )
-    key_features: List[str] = Field(
-        ...,
-        min_length=1,
-        description="Distinct architectural features, e.g., ['Cantilevered Balcony', 'Floor-to-ceiling windows', 'Atrium']"
-    )
-    color_palette: List[str] = Field(
-        ...,
-        min_length=1,
-        description="Dominant exterior and interior colors, e.g., ['Charcoal Gray', 'Natural Oak', 'Pure White']"
-    )
-    rooms: Optional[List[RoomSpec]] = Field(
-        default=None,
-        description="Breakdown of key rooms or zones inside the structure"
-    )
-    refined_3d_prompt: str = Field(
-        ...,
-        max_length=600,
-        description=(
-            "An optimized prompt engineered specifically for a text-to-3D diffusion model. "
-            "Must describe the exterior form, lighting, materials, architectural style, and clean geometry "
-            "without conversational filler. Maximum 600 characters."
-        )
-    )
+    building_type: str = Field(..., description="Classification (e.g. Villa, Office Tower, Pavilion)")
+    architectural_style: str = Field(..., description="Style (e.g. Modernist, Brutalist, Japandi)")
+    total_floors: int = Field(default=1, ge=1, le=100, description="Total number of floors")
+    materials: List[str] = Field(default_factory=list, description="Primary construction materials")
+    key_features: List[str] = Field(default_factory=list, description="Notable design characteristics")
+    color_palette: List[str] = Field(default_factory=list, description="Hex codes or color names")
+    rooms: Optional[List[RoomSpec]] = Field(default=None, description="Detailed room breakdown")
+    refined_3d_prompt: str = Field(..., description="Optimized prompt synthesized for 3D generation")
+
+    class Config:
+        from_attributes = True
+
+
+class GenerationRequest(BaseModel):
+    prompt: str = Field(..., min_length=3, description="Natural language building description")
+    conversation_id: Optional[str] = Field(default=None, description="Optional parent conversation ID")
+
+
+class GenerationResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str
+    conversation_id: Optional[str] = None
+
+
+class TaskResult(BaseModel):
+    task_id: str
+    status: str
+    architecture_spec: Optional[Union[str, ArchitectureSpec, dict]] = None
+    model_url: Optional[str] = None
+    preview_url: Optional[str] = None
+    created_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True

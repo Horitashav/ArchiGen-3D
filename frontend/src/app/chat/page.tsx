@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ChatLayout } from "@/components/chat/ChatLayout";
 import { Sidebar } from "@/components/chat/Sidebar";
@@ -11,45 +11,87 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import type { Conversation, Message, ArchitectureSpec } from "@/types";
 
+// Flag to skip the message-loading useEffect when we just created a conversation
+// from handleSubmit (prevents race condition that wipes optimistic messages)
+const SKIP_FETCH_FLAG = "__skip__";
+
 export default function ChatPage() {
   const router = useRouter();
   const { token, isAuthenticated, isLoading: authLoading } = useAuth();
 
+  // Conversation state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
 
+  // Generation & Inspection state
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeSpec, setActiveSpec] = useState<ArchitectureSpec | null>(null);
   const [activeModelUrl, setActiveModelUrl] = useState<string | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [showDetailPanel, setShowDetailPanel] = useState(false);
 
+  // Active SSE connection ref to allow clean cancellation
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // When handleSubmit creates a NEW conversation, we set this to true
+  // so the message-loading useEffect skips its next fetch (preventing it
+  // from overwriting our optimistic assistant message with stale DB data)
+  const skipNextFetchRef = useRef(false);
+
+  // Clean up any open SSE connection on component unmount
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  // Redirect if not authenticated
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push("/login");
     }
   }, [authLoading, isAuthenticated, router]);
 
+  // Fetch conversation history list on token load
   useEffect(() => {
     if (token) {
       api.getConversations(token).then(setConversations).catch(console.error);
     }
   }, [token]);
 
+  // Load message history when selecting a conversation
   useEffect(() => {
+    // Skip this fetch if handleSubmit just created the conversation
+    // (our optimistic messages are already in state — fetching from DB
+    // would overwrite them since the pipeline hasn't saved them yet)
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
+
     if (activeConversationId && token) {
       api.getMessages(activeConversationId, token).then((msgs) => {
         setMessages(msgs);
+
+        // Populate detail panel with the latest generated assistant model in this chat
         const lastAssistant = [...msgs].reverse().find(
           (m) => m.role === "assistant" && m.architecture_spec
         );
+
         if (lastAssistant) {
-          setActiveSpec(
-            typeof lastAssistant.architecture_spec === "string"
-              ? JSON.parse(lastAssistant.architecture_spec)
-              : lastAssistant.architecture_spec
-          );
+          const spec = typeof lastAssistant.architecture_spec === "string"
+            ? JSON.parse(lastAssistant.architecture_spec)
+            : lastAssistant.architecture_spec;
+
+          setActiveSpec(spec);
           setActiveModelUrl(lastAssistant.model_url);
+          if (lastAssistant.model_url) {
+            const match = lastAssistant.model_url.match(/\/([^\/]+)\.glb$/);
+            if (match) setActiveTaskId(match[1]);
+          }
           setShowDetailPanel(true);
         }
       }).catch(console.error);
@@ -57,29 +99,44 @@ export default function ChatPage() {
       setMessages([]);
       setActiveSpec(null);
       setActiveModelUrl(null);
+      setActiveTaskId(null);
       setShowDetailPanel(false);
     }
   }, [activeConversationId, token]);
 
   const handleNewChat = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
     setActiveConversationId(null);
     setMessages([]);
     setActiveSpec(null);
     setActiveModelUrl(null);
+    setActiveTaskId(null);
     setShowDetailPanel(false);
+    setIsGenerating(false);
   }, []);
 
   const handleSelectConversation = useCallback((id: string) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+    setIsGenerating(false);
     setActiveConversationId(id);
   }, []);
 
   const handleSubmit = useCallback(async (prompt: string) => {
     if (!token) return;
 
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
     setIsGenerating(true);
 
+    // 1. Optimistic User Message
     const userMessage: Message = {
-      id: `temp-user-${Date.now()}`,
+      id: `user-${Date.now()}`,
       conversation_id: activeConversationId || "",
       role: "user",
       content: prompt,
@@ -91,18 +148,25 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMessage]);
 
     try {
+      // 2. Submit Generation Task to Backend
       const response = await api.generateArchitecture(prompt, activeConversationId, token);
 
       if (!activeConversationId && response.conversation_id) {
+        skipNextFetchRef.current = true;  // Prevent useEffect from overwriting our messages
         setActiveConversationId(response.conversation_id);
         api.getConversations(token).then(setConversations);
       }
 
+      const currentTaskId = response.task_id;
+      setActiveTaskId(currentTaskId);
+
+      // 3. Placeholder Assistant Message
+      const assistantMessageId = `assistant-${Date.now()}`;
       const assistantMessage: Message = {
-        id: `temp-assistant-${Date.now()}`,
+        id: assistantMessageId,
         conversation_id: response.conversation_id || activeConversationId || "",
         role: "assistant",
-        content: "Generating your 3D model...",
+        content: "Initializing generation pipeline...",
         architecture_spec: null,
         model_url: null,
         status: response.status,
@@ -110,28 +174,57 @@ export default function ChatPage() {
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
-      const taskId = response.task_id;
-      const pollInterval = setInterval(async () => {
+      // 4. Connect to Real-Time SSE Stream
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+      const eventSource = new EventSource(`${API_URL}/architecture/tasks/${currentTaskId}/stream`);
+      eventSourceRef.current = eventSource;
+
+      eventSource.onmessage = (event) => {
+        if (event.data === "[DONE]") {
+          eventSource.close();
+          setIsGenerating(false);
+          if (token) api.getConversations(token).then(setConversations);
+          return;
+        }
+
         try {
-          const result = await api.getTaskStatus(taskId);
+          const result = JSON.parse(event.data);
+
+          if (result.error) {
+            eventSource.close();
+            setIsGenerating(false);
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? { ...msg, status: "failed", content: result.error }
+                  : msg
+              )
+            );
+            return;
+          }
 
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === assistantMessage.id
+              msg.id === assistantMessageId
                 ? {
                     ...msg,
                     status: result.status,
                     content:
                       result.status === "completed"
-                        ? "Here's your generated 3D architectural model:"
+                        ? "Here is your generated 3D architectural model:"
                         : result.status === "parsing"
-                        ? "Analyzing your architectural prompt..."
+                        ? "Analyzing architectural requirements..."
+                        : result.status === "generating_2d"
+                        ? "Synthesizing spatial massing and room layout..."
                         : result.status === "generating_3d"
                         ? "Building procedural 3D model geometry..."
                         : msg.content,
-                    architecture_spec: (result.architecture_spec as ArchitectureSpec) || msg.architecture_spec,
+                    architecture_spec:
+                      (typeof result.architecture_spec === "string"
+                        ? JSON.parse(result.architecture_spec)
+                        : result.architecture_spec) || msg.architecture_spec,
                     model_url: result.model_url
-                      ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "")}${result.model_url}`
+                      ? `${API_URL.replace("/api/v1", "")}${result.model_url}`
                       : msg.model_url,
                   }
                 : msg
@@ -139,38 +232,40 @@ export default function ChatPage() {
           );
 
           if (result.architecture_spec) {
-            const parsed =
-              typeof result.architecture_spec === "string"
-                ? JSON.parse(result.architecture_spec)
-                : result.architecture_spec;
-            setActiveSpec(parsed);
+            const parsedSpec = typeof result.architecture_spec === "string"
+              ? JSON.parse(result.architecture_spec)
+              : result.architecture_spec;
+            setActiveSpec(parsedSpec);
             setShowDetailPanel(true);
           }
+
           if (result.model_url) {
-            setActiveModelUrl(
-              `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "")}${result.model_url}`
-            );
+            setActiveModelUrl(`${API_URL.replace("/api/v1", "")}${result.model_url}`);
           }
 
           if (result.status === "completed" || result.status === "failed") {
-            clearInterval(pollInterval);
+            eventSource.close();
             setIsGenerating(false);
-            api.getConversations(token).then(setConversations);
+            if (token) api.getConversations(token).then(setConversations);
           }
-        } catch {
-          clearInterval(pollInterval);
-          setIsGenerating(false);
+        } catch (err) {
+          console.error("SSE parse error:", err);
         }
-      }, 3000);
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        setIsGenerating(false);
+      };
     } catch (err) {
       setIsGenerating(false);
       setMessages((prev) => [
         ...prev,
         {
-          id: `temp-error-${Date.now()}`,
+          id: `error-${Date.now()}`,
           conversation_id: activeConversationId || "",
           role: "assistant",
-          content: err instanceof Error ? err.message : "Something went wrong.",
+          content: err instanceof Error ? err.message : "Failed to initiate generation.",
           architecture_spec: null,
           model_url: null,
           status: "failed",

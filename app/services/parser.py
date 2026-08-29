@@ -1,45 +1,41 @@
-import instructor
-from openai import AsyncOpenAI
+import json
+from groq import AsyncGroq
 from app.config import settings
 from app.schemas.architecture import ArchitectureSpec
-from app.core.exceptions import LLMParsingError
 
-# Configure AsyncOpenAI client pointing to Groq's endpoint
-groq_client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=settings.GROQ_API_KEY,
-)
+client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
-# Patch with instructor using JSON mode
-client = instructor.from_openai(groq_client, mode=instructor.Mode.JSON)
+SYSTEM_PROMPT = """You are an expert architectural AI assistant.
+Analyze the user's natural language building request and output a structured JSON object strictly matching this schema:
+{
+  "building_type": "string (e.g. Modern Villa, Tea House, Office)",
+  "architectural_style": "string (e.g. Traditional Japanese, Brutalist, Minimalist)",
+  "total_floors": 1 to 10 (integer),
+  "materials": ["material 1", "material 2"],
+  "key_features": ["feature 1", "feature 2"],
+  "color_palette": ["#hex1", "#hex2" or color names],
+  "rooms": [
+    {"name": "Room Name", "floor_level": 1, "dimensions_approx": "5m x 4m"}
+  ],
+  "refined_3d_prompt": "Concise visual prompt for procedural 3D modeling"
+}
 
-SYSTEM_PROMPT = """You are an expert architectural designer, urban planner, and 3D modeling specialist.
-Your task is to analyze natural language building descriptions and transform them into a strict architectural specification blueprint.
-
-Key Directives:
-1. Identify the primary building type, architectural style, and spatial features.
-2. If the user input is ambiguous or incomplete, infer realistic architectural defaults based on the chosen design style.
-3. Generate a concise, highly descriptive `refined_3d_prompt` tailored for a text-to-3D diffusion model.
-   - Describe exterior geometry, massing, facade materials, lighting, and ambient setting.
-   - Use clean architectural keywords (e.g., 'photorealistic', 'archviz', 'octane render', 'clear geometry').
-   - Keep the `refined_3d_prompt` strictly under 600 characters without conversational filler.
+Respond ONLY with valid JSON. No conversational wrapper or markdown backticks.
 """
 
-async def parse_architecture_prompt(user_text: str) -> ArchitectureSpec:
-    """
-    Extracts an ArchitectureSpec blueprint from raw user text using Instructor + Groq.
-    """
-    try:
-        spec = await client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            response_model=ArchitectureSpec,
-            max_retries=3,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_text}
-            ],
-            temperature=0.2,
-        )
-        return spec
-    except Exception as exc:
-        raise LLMParsingError(f"LLM extraction failed: {str(exc)}")
+async def parse_architecture_prompt(prompt: str) -> ArchitectureSpec:
+    model_name = settings.GROQ_MODEL_NAME or "openai/gpt-oss-20b"
+
+    response = await client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+    )
+
+    content = response.choices[0].message.content
+    data = json.loads(content)
+    return ArchitectureSpec.model_validate(data)
